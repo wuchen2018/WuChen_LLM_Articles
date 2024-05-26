@@ -1,5 +1,7 @@
 本文通过chatGLM的例子，来分析transformers库加载分词器的逻辑。
-
+- [代码](#代码)
+- [通过AutoTokenizer加载分词器](#通过AutoTokenizer加载分词器)
+- [通过ChatGLMTokenizer加载分词器](#通过ChatGLMTokenizer加载分词器)
 # 代码
 ```python
 from tokenizer.tokenization_chatglm import ChatGLMTokenizer
