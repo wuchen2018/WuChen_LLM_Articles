@@ -1,3 +1,7 @@
+- [optuna是什么](#optuna是什么)
+- [超参数优化是什么](#超参数优化是什么)
+- [optuna实战](#optuna实战)
+
 # optuna是什么
 Optuna是一个开源的超参数优化框架，Optuna与框架无关，可以在任何机器学习或深度学习框架中使用它。
 
@@ -30,7 +34,7 @@ Population Based Training (PBT)
 超参数优化方法可以大大减轻手动调试超参数的负担，提高模型性能，并提高模型搜索的效率。由于超参数优化通常涉及多次训练和评估模型，该过程可能非常耗时，因此，高效的超参数优化算法对于节省时间和计算资源至关重要。
 
 # optuna实战
-# 参考资料
+## 参考资料
 本文分享optuna在大模型领域的实战。用到的代码来自于：
 
 https://github.com/zyds/transformers-code/tree/master
@@ -43,7 +47,7 @@ https://github.com/zyds/transformers-code/tree/master
 
 【【手把手带你实战HuggingFace Transformers-番外技能篇】基于Optuna的transformers模型自动调参】 【手把手带你实战HuggingFace Transformers-番外技能篇】基于Optuna的transformers模型自动调参_哔哩哔哩_bilibili
 
-# 全部代码
+## 全部代码
 本代码使用transformers库来微调huggingface里的"hfl/rbt3"模型（一种bert模型）。代码来源：https://github.com/zyds/transformers-code/blob/master/Others/01-hyp_tune/hyp_tune_optuna.ipynb
 ```python
 from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, TrainingArguments
