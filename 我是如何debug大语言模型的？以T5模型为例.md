@@ -53,14 +53,19 @@ if self.config.is_encoder_decoder and "encoder_outputs" not in model_kwargs:
 进入这行代码单步调试，的确发现，input_ids被送进了模型的encoder模块中，产生了encoder_outputs.这里的input_ids的shape是1*310。经过编码后，model_kwargs["encoder_outputs"].last_hidden_state.shape是torch.Size([1, 310, 768])
 
 # 解码器的输入是什么？
-```python
+
 现在，模型的编码器已经将输入编码了。接下来就要考虑解码器了。编码器的输入是input_ids（可能还包括attention_mask，但是这个矩阵的结果都是1，可能是因为整个语料都视为一句话）。那么解码器的输入是什么呢？
+
 解码器的输入包括两个（我是如何知道的？也是一行一行代码debug出来的，详见后文），第一个是解码器的input_ids，解码器的input_ids不是编码器的input_ids，而是：tensor([[0]], device='cuda:0')
+
 这个张量是啥？我寻思着，看到有一行代码是：
+
 decoder_start_token_id=generation_config.decoder_start_token_id
+
 这行代码的意思是，解码器的初始token就是被设定为0.我调用tokenizer.decode后发现，对应的字符是<pad>。可能它的意思是想让模型输出的第一个token是<pad>。不管怎么说，这是模型的设定。这个设定其实可以在config.json文件里看到，里面有一decoder_start_token_id的字段。
+
 解码器的第二个输入就是encoder_outputs.last_hidden_state，shape=torch.Size([1, 310, 768])，就是编码器的输出。
-```
+
 这是调用解码器的代码：
 ```python
 decoder_outputs = self.decoder(
