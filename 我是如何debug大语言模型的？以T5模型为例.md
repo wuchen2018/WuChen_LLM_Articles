@@ -37,6 +37,7 @@ pipe("摘要生成:\n"+ds["test"][0]["content"], max_length=64, do_sample=True)
 为了解决我的问题，我的办法是，先运行一下model('hello')，然后看报错，定位到了这一行的错误：
 /opt/conda/envs/transformers2/lib/python3.9/site-packages/transformers/models/t5/modeling_t5.py:1711, in T5ForConditionalGeneration.forward(.............)
 于是这就顺藤摸瓜找到了源代码。（经过简单的了解，发现T5ForConditionalGeneration这个类是T5模型中用于生成任务的类）。于是我在这附近几行代码里打了断点。
+
 # 编码器
 打了断点后，发现不太对劲，为什么在这个类中，模型的输入有一个encoder_outputs？一般来说，模型的输入是input_ids，是一些整数，怎么在这个类的forward方法，模型的输入看起来是已经经过了某种编码的张量？
 于是利用vscode的CALL_STACK栏，我终于在/opt/conda/envs/transformers2/lib/python3.9/site-packages/transformers/generation/utils.py找到了这几行代码：
@@ -50,13 +51,16 @@ if self.config.is_encoder_decoder and "encoder_outputs" not in model_kwargs:
 ```
 这几行的代码的意思是，如果这个模型是encoder_decoder模型，那么先将输入运输到模型的encoder模块中去，编码器产生的结果整合到model_kwargs中。
 进入这行代码单步调试，的确发现，input_ids被送进了模型的encoder模块中，产生了encoder_outputs.这里的input_ids的shape是1*310。经过编码后，model_kwargs["encoder_outputs"].last_hidden_state.shape是torch.Size([1, 310, 768])
+
 # 解码器的输入是什么？
+```python
 现在，模型的编码器已经将输入编码了。接下来就要考虑解码器了。编码器的输入是input_ids（可能还包括attention_mask，但是这个矩阵的结果都是1，可能是因为整个语料都视为一句话）。那么解码器的输入是什么呢？
 解码器的输入包括两个（我是如何知道的？也是一行一行代码debug出来的，详见后文），第一个是解码器的input_ids，解码器的input_ids不是编码器的input_ids，而是：tensor([[0]], device='cuda:0')
 这个张量是啥？我寻思着，看到有一行代码是：
 decoder_start_token_id=generation_config.decoder_start_token_id
 这行代码的意思是，解码器的初始token就是被设定为0.我调用tokenizer.decode后发现，对应的字符是<pad>。可能它的意思是想让模型输出的第一个token是<pad>。不管怎么说，这是模型的设定。这个设定其实可以在config.json文件里看到，里面有一decoder_start_token_id的字段。
 解码器的第二个输入就是encoder_outputs.last_hidden_state，shape=torch.Size([1, 310, 768])，就是编码器的输出。
+```
 这是调用解码器的代码：
 ```python
 decoder_outputs = self.decoder(
