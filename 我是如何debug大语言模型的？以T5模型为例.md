@@ -50,7 +50,7 @@ if self.config.is_encoder_decoder and "encoder_outputs" not in model_kwargs:
 ```
 这几行的代码的意思是，如果这个模型是encoder_decoder模型，那么先将输入运输到模型的encoder模块中去，编码器产生的结果整合到model_kwargs中。
 进入这行代码单步调试，的确发现，input_ids被送进了模型的encoder模块中，产生了encoder_outputs.这里的input_ids的shape是1*310。经过编码后，model_kwargs["encoder_outputs"].last_hidden_state.shape是torch.Size([1, 310, 768])
-解码器的输入是什么？
+# 解码器的输入是什么？
 现在，模型的编码器已经将输入编码了。接下来就要考虑解码器了。编码器的输入是input_ids（可能还包括attention_mask，但是这个矩阵的结果都是1，可能是因为整个语料都视为一句话）。那么解码器的输入是什么呢？
 解码器的输入包括两个（我是如何知道的？也是一行一行代码debug出来的，详见后文），第一个是解码器的input_ids，解码器的input_ids不是编码器的input_ids，而是：tensor([[0]], device='cuda:0')
 这个张量是啥？我寻思着，看到有一行代码是：
@@ -82,7 +82,7 @@ decoder_outputs = self.decoder(
 [0]经过embedding层后，变成了一个768维的向量。
 每一个解码器的block，主要包括三个步骤
 第一个步骤是自注意力机制，只需把解码器的输入送进去即可。在这里，是把那个768维的向量送进去。（注意，这只是第一轮的情况。在第二轮，需要把2\*768的数据送进去。以此类推，直到模型生成的过程结束。具体参考transformer的生成机制）
-得到1*1*768的输出。
+得到1\*1\*768的输出。
 第二个步骤是交叉注意力。
 输入是上一个步骤的输出（1*1*768），以及编码器的输出（1*310*768），来做一个交叉注意力。交叉注意力，具体来说，在注意力机制中，Q来自解码器上一个步骤的输出，K和V来自编码器。
 生成的结果仍然是1*1*768
