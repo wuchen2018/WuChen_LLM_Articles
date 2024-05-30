@@ -9,9 +9,19 @@
 我偶尔会在B站发一些讲解LLM领域底层原理的视频，比如transformer/LoRA/stable diffusion等。
 
 我的B站：https://space.bilibili.com/271305784?spm_id_from=333.1007.0.0
+***
+我的B站视频：
+【[纯手撕、无PPT、大白话]从零推导diffusion_1_加噪过程】 https://www.bilibili.com/video/BV1284y1D7dj/?share_source=copy_web&vd_source=97da61a87d5a14ca15b351252ae0f105
+
+【[纯手撕]从零推导transformer_1_词嵌入】 https://www.bilibili.com/video/BV1mC4y1o7z3/?share_source=copy_web&vd_source=97da61a87d5a14ca15b351252ae0f105
+
+【stable diffusion的大致原理_1_clip】 https://www.bilibili.com/video/BV1JV411c7Zi/?share_source=copy_web&vd_source=97da61a87d5a14ca15b351252ae0f105
+
+【[参数高效微调系列1]LoRA的原理与简单实现】 https://www.bilibili.com/video/BV1zz4y1P7SF/?share_source=copy_web&vd_source=97da61a87d5a14ca15b351252ae0f105
+
 
 ***
-我的知乎文章列表：
+我的知乎文章：
 
 为什么现在的LLM都是Decoder only的架构？ - 武辰的回答 - 知乎
 https://www.zhihu.com/question/588325646/answer/3515316314
