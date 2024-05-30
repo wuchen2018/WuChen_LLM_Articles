@@ -50,7 +50,7 @@ if self.config.is_encoder_decoder and "encoder_outputs" not in model_kwargs:
     )
 ```
 这几行的代码的意思是，如果这个模型是encoder_decoder模型，那么先将输入运输到模型的encoder模块中去，编码器产生的结果整合到model_kwargs中。
-进入这行代码单步调试，的确发现，input_ids被送进了模型的encoder模块中，产生了encoder_outputs.这里的input_ids的shape是1*310。经过编码后，model_kwargs["encoder_outputs"].last_hidden_state.shape是torch.Size([1, 310, 768])
+进入这行代码单步调试，的确发现，input_ids被送进了模型的encoder模块中，产生了encoder_outputs.这里的input_ids的shape是1\*310。经过编码后，model_kwargs["encoder_outputs"].last_hidden_state.shape是torch.Size([1, 310, 768])
 
 # 解码器的输入是什么？
 
@@ -84,6 +84,7 @@ decoder_outputs = self.decoder(
 )
 ```
 一行一行去看上面代码的输入，在输入方面，只有decoder_input_ids/hidden_states是有值的，attention_mask全部是1，应该没啥用。decoder_input_ids就是[0]，hidden_states就是编码器的输出。
+
 # 解码器里面有什么？
 （源码：/opt/conda/envs/transformers2/lib/python3.9/site-packages/transformers/models/t5/modeling_t5.py中的T5Block）
 接下来，来看看解码器里面有什么。（你可能会问为什么不看编码器里有什么，其实编码器就是普通的encoder，如果你熟悉了BERT就不必再去重复debug编码器里面的内容）
@@ -93,7 +94,7 @@ decoder_outputs = self.decoder(
 第一个步骤是自注意力机制，只需把解码器的输入送进去即可。在这里，是把那个768维的向量送进去。（注意，这只是第一轮的情况。在第二轮，需要把2\*768的数据送进去。以此类推，直到模型生成的过程结束。具体参考transformer的生成机制）
 得到1\*1\*768的输出。
 第二个步骤是交叉注意力。
-输入是上一个步骤的输出（1*1*768），以及编码器的输出（1*310*768），来做一个交叉注意力。交叉注意力，具体来说，在注意力机制中，Q来自解码器上一个步骤的输出，K和V来自编码器。
-生成的结果仍然是1*1*768
+输入是上一个步骤的输出（1\*1\*768），以及编码器的输出（1\*310\*768），来做一个交叉注意力。交叉注意力，具体来说，在注意力机制中，Q来自解码器上一个步骤的输出，K和V来自编码器。
+生成的结果仍然是1\*1\*768
 第三个步骤是前馈层，比较简单，就不说了。
 剩下的步骤和普通的decoder only类似了，就不再细说了。有一个细节是，虽然每次推理的时候，encoder都要参与，但是encoder只需要计算一次，在每次predict next word的时候，encoder都是不变的（有点像kvcache的感觉）。
