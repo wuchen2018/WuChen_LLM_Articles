@@ -9,3 +9,6 @@
 我偶尔会在B站发一些讲解LLM领域底层原理的视频，比如transformer/LoRA/stable diffusion等。
 
 我的B站：https://space.bilibili.com/271305784?spm_id_from=333.1007.0.0
+
+为什么现在的LLM都是Decoder only的架构？ - 武辰的回答 - 知乎
+https://www.zhihu.com/question/588325646/answer/3515316314
