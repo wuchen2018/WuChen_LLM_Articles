@@ -54,7 +54,7 @@ eos_token是停止词。除此之外，还加了<|user|>和<|observation|>作为
 微调命令是：xtuner train chatglm3_6b_qlora_alpaca_enzh_oasst1_e3_copy.py
 
 在vscode上微调，也比较好配置：
-
+```
 {
     "name": "Python2: Xtuner Training",
     "type": "python",
@@ -65,6 +65,7 @@ eos_token是停止词。除此之外，还加了<|user|>和<|observation|>作为
     "console": "integratedTerminal",
     "justMyCode": false,
 },
+```
 当我开始debug后，我发现竟然进不去modeling_chatglm.py，这真是一件奇怪的事情。没办法，只好从头开始debug。不过好在之前的文章有过一些记录。我可以直接在/opt/conda/lib/python3.10/site-packages/mmengine/runner/runner.py的build_dataloader函数打断点。
 
 但是后面的debug之路并没有那么顺利。经过辛苦的探索，发现在源代码xtuner/xtuner/dataset/huggingface.py中负责加载数据并且做预处理。
