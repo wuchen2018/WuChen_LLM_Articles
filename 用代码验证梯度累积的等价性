@@ -1,0 +1,138 @@
+梯度累积指的是在累积到一定steps后再做梯度更新的操作，此操作在一般情况下和直接用大batch是等价的。
+
+我想验证这种等价性，即，情况1：不使用梯度累积，batchsize=b1
+
+情况2：使用梯度累积，batchsize = b1/accumulation_steps
+
+两种情况的训练成果是否等价？
+
+直接上代码：
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
+
+# Step 1: 创建数据集
+# 假设我们有以下的数据(输入x和输出y)，数据量为6
+x_data = torch.tensor([[1.0], [2.0], [3.0], [4.0], [5.0], [6.0]])
+y_data = torch.tensor([[2.0], [4.0], [6.0], [8.0], [10.0], [12.0]])
+
+# 创建一个 TensorDataset 和 DataLoader
+dataset = TensorDataset(x_data, y_data)
+batch_size = 2
+dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+
+# Step 2: 定义模型
+class LinearModel(nn.Module):
+    def __init__(self):
+        super(LinearModel, self).__init__()
+        self.linear = nn.Linear(1, 1)
+        # self.bn = nn.BatchNorm1d(1)
+
+    def forward(self, x):
+        x = self.linear(x)
+        # x = self.bn(x)
+        return x
+
+model = LinearModel()
+model.train()
+
+# 指定初始参数
+with torch.no_grad():
+    model.linear.weight.fill_(0.5)  # 设定权重初始值为0.5
+    model.linear.bias.fill_(-1.0)   # 设定偏差初始值为-1.0
+
+# Step 3: 定义损失函数和优化器
+criterion = nn.MSELoss()
+optimizer = optim.SGD(model.parameters(), lr=0.01)
+
+# Step 4: 训练模型
+epochs = 2
+accumulation_steps = 2  # 设置梯度累积步数（在这个例子中每个epoch训练3次）
+
+for epoch in range(epochs):
+    optimizer.zero_grad()  # 清空梯度
+    accumulated_loss = 0.0
+    # accumulated_loss.requires_grad=True
+
+    # 使用 DataLoader 迭代数据
+    for i, (inputs, targets) in enumerate(dataloader):
+        y_pred = model(inputs)
+        # print('===epoch:{}  batch:{}'.format(epoch,i),'\n',
+        #       'y_pred:',[[round(num, 2) for num in sublist] for sublist in y_pred.tolist()],'\n',
+        #       'targets:',[[round(num, 2) for num in sublist] for sublist in targets.tolist()],'\n',
+        #       'inputs:',[[round(num, 2) for num in sublist] for sublist in inputs.tolist()]
+        #       )
+        loss = criterion(y_pred, targets)
+        loss = loss / accumulation_steps
+        # print('loss:',loss.tolist())
+        loss.backward()  # 反向传播，但不立即更新权重
+        # print(f'linear Weight Grad: {model.linear.weight.grad}, Bias Grad: {model.linear.bias.grad}')
+        # print(f'bn Weight Grad: {model.bn.weight.grad}, Bias Grad: {model.bn.bias.grad}')
+        accumulated_loss += loss.item()
+
+        # 每 `accumulation_steps` 步后更新权重
+        if (i + 1) % accumulation_steps == 0 or (i + 1) == len(dataloader):
+            # accumulated_loss.backward()
+            optimizer.step()
+            optimizer.zero_grad()
+
+    # print(f'Epoch: {epoch+1}/{epochs}, accumulated_loss: {accumulated_loss / len(dataloader)}')
+
+print("Training finished")
+print('accumulation_steps:',accumulation_steps,' batch_size:',batch_size)
+print('model.linear.weight',model.linear.weight)
+print('model.linear.bias',model.linear.bias)
+# print('model.bn.weight',model.bn.weight)
+# print('model.bn.bias',model.bn.bias)
+```
+以下是我做了几次实验的结果：
+
+```python
+
+
+Training finished
+accumulation_steps: 2  batch_size: 3
+model.linear.weight Parameter containing:
+tensor([[1.3820]], requires_grad=True)
+model.linear.bias Parameter containing:
+tensor([-0.7893], requires_grad=True)
+
+Training finished
+accumulation_steps: 3  batch_size: 2
+model.linear.weight Parameter containing:
+tensor([[1.3820]], requires_grad=True)
+model.linear.bias Parameter containing:
+tensor([-0.7893], requires_grad=True)
+
+Training finished
+accumulation_steps: 1  batch_size: 6
+model.linear.weight Parameter containing:
+tensor([[1.3820]], requires_grad=True)
+model.linear.bias Parameter containing:
+tensor([-0.7893], requires_grad=True)
+
+Training finished
+accumulation_steps: 6  batch_size: 1
+model.linear.weight Parameter containing:
+tensor([[1.3820]], requires_grad=True)
+model.linear.bias Parameter containing:
+tensor([-0.7893], requires_grad=True)
+
+Training finished
+accumulation_steps: 2  batch_size: 2
+model.linear.weight Parameter containing:
+tensor([[1.5977]], requires_grad=True)
+model.linear.bias Parameter containing:
+tensor([-0.7290], requires_grad=True)
+```
+可以看到，只要满足accumulation_steps*batch_size相等，那么产生的结果是一致的，可以得到同样的参数。
+
+有几个细节需要注意。
+
+（1）等价的前提是加载数据时，shuffle=False。如果shuffle=True，batch之间的数据被打乱，此时不一定等价。（特殊情况是accumulation_steps*batch_size=一个epoch内所有的数据的数量）
+
+（2）我在之前的文章的最后中提到一个问题（武辰：关于梯度累加pytorch实现的一个细节——loss = loss / accumulation_steps），是错误的写法。因为accumulated_loss是标量，无法对各个节点的梯度实现追踪。
+
+（3）如果网络中有BN层，结果也是不等价的。而且加了BN层的网络（上面代码中的注释部分有BN层）反而更难学习，无法收敛。这是因为BN被加在了网络的最后一层，这样导致最后一层的输出基本被限定在(0,1)的区间内，难以拟合真实的label。
