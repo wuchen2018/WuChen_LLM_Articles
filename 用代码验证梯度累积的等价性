@@ -86,8 +86,11 @@ print('model.linear.weight',model.linear.weight)
 print('model.linear.bias',model.linear.bias)
 # print('model.bn.weight',model.bn.weight)
 # print('model.bn.bias',model.bn.bias)
+
 ```
+
 以下是我做了几次实验的结果：
+
 
 ```python
 
