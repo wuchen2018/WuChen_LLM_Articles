@@ -1,8 +1,11 @@
 # WuChen_LLM_Articles
 
 我是一名AIGC算法工程师，喜欢在网络上分享我的一些经验和理解。我主要在三个平台分享。
+
 第一个平台是知乎。知乎主要发一些和概率论、深度学习、LLM相关的理论文章。我的知乎：https://www.zhihu.com/people/b9f8da41c54915f96f415154e1348737
+
 第二个平台是Github。我将偏向于代码的文章发在GitHub。
+
 第三个平台是B站。我在上面发一些讲解LLM领域底层原理的视频，比如transformer/LoRA/stable diffusion等。我的B站：https://space.bilibili.com/271305784?spm_id_from=333.1007.0.0
 
 ***
