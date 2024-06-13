@@ -2,6 +2,7 @@
 - [代码](#代码)
 - [通过AutoTokenizer加载分词器](#通过AutoTokenizer加载分词器)
 - [通过ChatGLMTokenizer加载分词器](#通过ChatGLMTokenizer加载分词器)
+
 # 代码
 ```python
 from tokenizer.tokenization_chatglm import ChatGLMTokenizer
