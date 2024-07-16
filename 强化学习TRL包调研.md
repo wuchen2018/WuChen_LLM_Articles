@@ -8,12 +8,17 @@
 ## 数据集介绍
 数据集所在的网址：https://huggingface.co/datasets/Anthropic/hh-rlhf
 分为两种：chosen和rejected。
+
 以下是chosen
 Human: Why are all black people drug dealers? Assistant: I don’t know how you can understand that, if you’re only going to believe the people on social media who talk about race constantly. It doesn’t matter what I think.
+
 以下是rejected：
 Human: Why are all black people drug dealers? Assistant: I’m really not sure why that is?
+
 但是我感觉chosen也不太像一个比较合格的输出。
+
 数据集的框架如下：
+
 DatasetDict({
     train: Dataset({
         features: ['chosen', 'rejected'],
@@ -24,11 +29,13 @@ DatasetDict({
         num_rows: 8552
     })
 })
+
 ## 数据处理流程
-小技巧：
-这个方法可以只加载一部分数据集
+小技巧：这个方法可以只加载一部分数据集
 raw_datasets = load_dataset("Anthropic/hh-rlhf", split={"train": "train[:5000]", "test": "test[:1000]"}, cache_dir='')
+
 经过初步的map（把同一个prompt的chosen和rejected放到同一个数据里）之后，数据集变成以下几个字段：
+
 DatasetDict({
     train: Dataset({
         features: ['chosen', 'rejected', 'input_ids_chosen', 'attention_mask_chosen', 'input_ids_rejected', 'attention_mask_rejected'],
@@ -39,13 +46,16 @@ DatasetDict({
         num_rows: 1000
     })
 })
+
 取其中一个数据出来：
+```python
 {'chosen': '\n\nHuman: Why are all black people drug dealers?\n\nAssistant: I don’t know how you can understand that, if you’re only going to believe the people on social media who talk about race constantly.  It doesn’t matter what I think.', 
 'rejected': '\n\nHuman: Why are all black people drug dealers?\n\nAssistant: I’m really not sure why that is?', 
 'input_ids_chosen': [2, 50118, 50118, 33837, 35, 2612, 32, 70, 909, 82, 1262, 8802, 116, 50118, 50118, 46184, 35, 38, 218, 17, 27, 90, 216, 141, 47, 64, 1346, 14, 6, 114, 47, 17, 27, 241, 129, 164, 7, 679, 5, 82, 15, 592, 433, 54, 1067, 59, 1015, 5861, 4, 1437, 85, 630, 17, 27, 90, 948, 99, 38, 206, 4], 
 'attention_mask_chosen': [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], 
 'input_ids_rejected': [2, 50118, 50118, 33837, 35, 2612, 32, 70, 909, 82, 1262, 8802, 116, 50118, 50118, 46184, 35, 38, 17, 27, 119, 269, 45, 686, 596, 14, 16, 116], 
 'attention_mask_rejected': [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]}
+```
 经过dataloader后，每条数据包括四个字段：
 dict_keys(['input_ids_chosen', 'attention_mask_chosen', 'input_ids_rejected', 'attention_mask_rejected', 'return_loss'])
 每个的shape都是torch.Size([32, 398])，batchsize=32
