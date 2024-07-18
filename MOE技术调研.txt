@@ -1,0 +1,156 @@
+参考资料
+图解Mixtral 8 * 7b推理优化原理与源码实现 - 猛猿的文章 - 知f乎
+https://zhuanlan.zhihu.com/p/691066049
+模型介绍
+网址：
+https://huggingface.co/mistralai/Mixtral-8x7B-Instruct-v0.1
+https://github.com/mistralai/mistral-inference
+我下载了两个模型，
+第一个模型是mistralai/Mixtral-8x7B-Instruct-v0.1
+第二个模型是mistralai/Mixtral-8x22B-v0.1
+对于8x7B，后者的一些基本信息有：
+"hidden_size": 4096,
+"num_hidden_layers": 32,
+"vocab_size": 32000
+max_position_embeddings": 32768,
+总参数量：46 702 792 704
+相当于46b参数
+以fp16加载模型后，占用显存91.5G
+从官网github下载模型（不是huggingface），模型的pth文件占用磁盘空间大小是93 405 769 143
+对于8x22B，后者的一些基本信息有：
+"hidden_size": 6144,
+"num_hidden_layers": 56,
+"vocab_size": 32768
+max_position_embeddings": 65536,
+总参数量：140 630 071 296
+相当于140b参数
+模型的亮点有两个：
+（1）专家混合模型
+（2）滑动注意力机制，体现在两方面：训练方面，注意力是滑动的。推理方面，kvcache也是滑动的。
+关于experts
+expert_layer的参数量是1 409 286 144 = 4096*14336*3*8
+ModuleList(
+  (0-7): 8 x MixtralBlockSparseTop2MLP(
+    (w1): Linear(in_features=4096, out_features=14336, bias=False)
+    (w2): Linear(in_features=14336, out_features=4096, bias=False)
+    (w3): Linear(in_features=4096, out_features=14336, bias=False)
+    (act_fn): SiLU()
+  )
+)
+算一下总参数
+expert_layer的总参数量是1409286144*32=45097156608
+自注意力层的总参数量是(4096*4096+4096*1024+4096*1024+4096*4096)=1342177280
+embedding层的总参数量是32000*4096*2=262144000
+norm层的总参数量是4096*2*32+4096=266240
+加起来是46701744128，和46702792704有点出入
+huggingface的加载方式
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+model_id = "/home/notebook/data/group/huggingface/mixtrals/mixtral-8x7b"
+model = AutoModelForCausalLM.from_pretrained(model_id, torch_dtype=torch.float16, device_map="auto")
+tokenizer = AutoTokenizer.from_pretrained(model_id)
+
+
+messages = [{"role": "user", "content": "What is deep learning?"},]
+inputs = tokenizer.apply_chat_template(messages, return_tensors="pt").to("cuda")
+outputs = model.generate(inputs, max_new_tokens=20)
+out = tokenizer.decode(outputs[0])
+print('out:',out)
+一些注意事项：
+（1）官方的huggingface给出的方法和github给出的方法不一样。
+（2）按照作者的意思，似乎要用自己开发的包来加载，用huggingface的方式来加载会出现问题。但是它们又给出了huggingface的加载方式。
+Debug 8x7b模型
+【1】模型的输入
+inputs=tensor([[    1,   733, 16289, 28793,  1824,   349,  3534,  5168, 28804,   733,
+         28748, 16289, 28793]], device='cuda:0')
+tokenizer.decode(inputs[0])='<s> [INST] What is deep learning? [/INST]'
+【2】分组注意力
+hidden_states.shape=torch.Size([1, 13, 4096])
+三分天下后，
+query_states.shape=torch.Size([1, 13, 4096])
+key_states.shape=torch.Size([1, 13, 1024])
+value_states.shape=torch.Size([1, 13, 1024])
+可以看到它用了共享注意力。chatglm9b也是4096，不过它的key和value是query的1/16。这里只是1/4.
+【3】moe机制
+这一部分主要在MixtralSparseMoeBlock这个类里。
+第1步，将hidden_states摊平
+输入：torch.Size([1, 13, 4096])
+输出：torch.Size([13, 4096])
+第2步，gate（其实就是一个线性层，hidden_dim -> 专家数）
+输入：torch.Size([13, 4096])
+输出：torch.Size([13, 8])
+第3步，softmax
+输入：torch.Size([13, 8])
+输出：torch.Size([13, 8])
+这个矩阵的意义是，对于每一个token，列举8个模型的权重，权重越大，越应该接下来用那个expert
+第4步，topk操作（k=2），找出最大的两个权重，并且重新赋予权重（分数），使得每一行加起来等于1
+输入：torch.Size([13, 8])
+输出：torch.Size([13, 2])，和得分矩阵：torch.Size([13, 2])
+之所以有两个矩阵，是因为一个是index，另一个是分数。比如第一个矩阵的一行是[5,1]，代表对于第一个token，第5个专家的得分最高，第1个专家的得分第二高。然后第二个矩阵的第一行是[0.66,0.34]，代表第5个专家的得分是0.66，第1个专家的得分是0.34
+第5步，全0初始化生成final_hidden_states矩阵，shape=torch.Size([13, 4096]
+第6步，一个专家一个专家遍历。一共8个专家。
+比如说现在先遍历到第1个专家。
+[6.1]看这个专家擅长哪些token。在这里有三个：12，0，8
+如何定义擅长：如果某个token的8个模型的权重中，位于排前两名的模型，为擅长该token的专家模型。
+[6.2]从hidden_states（13x4096）中抽出擅长的token，得到current_state（3x4096）
+[6.3]将current_state送进专家模型（仍然是FNN网络）中，得到（3x4096）的输出current_hidden_states
+[6.4]每一行乘以对应的分数。第4步得到了一个得分矩阵。本专家擅长的token有3个：12，0，8。其中对于第12个token来说，本专家是最优选择，得分是0.6（一定大于0.5）；对于第0和第8个token来说，本专家是次优选择，得分是0.2和0.25（一定小于0.5）.
+那么对于（3x4096）的输出current_hidden_states，第一行全部乘以0.6，第二行全部乘以0.2，第三行全部乘以0.25.
+[6.5]将这个（3x4096）的输出current_hidden_states，加到final_hidden_states的第12，0，8行中去。
+最终，final_hidden_states，代替hidden_states，称为moe的输出
+【3.1】moe机制，从decode角度再审视一遍
+decode阶段，每次输入的token个数只有一个。
+第1步，将hidden_states摊平
+输入：torch.Size([1, 1, 4096])
+输出：torch.Size([1, 4096])
+第2步，gate（其实就是一个线性层，hidden_dim -> 专家数）
+输入：torch.Size([1, 4096])
+输出：torch.Size([1, 8])
+第3步，softmax
+输入：torch.Size([1, 8])
+输出：torch.Size([1, 8])
+这个矩阵的意义是，对于这个token，列举8个模型的权重，权重越大，越应该接下来用那个expert
+第4步，topk操作（k=2），找出最大的两个权重，并且重新赋予权重（分数），使得每一行加起来等于1
+输入：torch.Size([1, 8])
+输出：torch.Size([1, 2])，和得分矩阵：torch.Size([1, 2])
+第5步，全0初始化生成final_hidden_states矩阵，shape=torch.Size([1, 4096]
+第6步，一个专家一个专家遍历。一共8个专家。
+其实有且只有两个专家需要遍历 ，好好感悟这一点。因为只有一个token。
+这个token得分最高的是第三个专家，分数是0.73，得分第二的是第二个专家，分数是0.27.
+那么在遍历到第二个专家的时候，把current_state（其实就是hidden_state，shape=1*4096）送进第二个专家，然后乘以0.27，加到final_hidden_states里。
+然后遍历第三个专家。
+其实换个角度来看，本质上是0.27*hidden_state送进第二个专家的输出+0.73*hidden_state送进第三个专家的输出，是一种加权和。
+每个token都是这样。
+【3.2】做一个直观的总结
+每一个token都有一个4096维度的向量，gate网络（其实就是一个线性层）可以根据这个4096维度的向量，为每个专家（候选人）打分。
+然后对于每个token，选出打分最高的两个专家。然后这个token的4096维度的向量，变成分数1*hidden_state送进第x1个专家的输出+分数2*hidden_state送进第x2个专家的输出。其中两个分数之和为1。
+这样如果一个token一个token遍历，会比较慢。每个token要跑2个模型，如果有1000个token的话，要跑2000次模型。
+可以从另一个角度：对每一个专家，看它擅长哪些token。然后把那些token的hidden_state取出来，送进这个专家网络，得到输出，累加到输出矩阵中。得到的结果是一样的。
+因为一共要跑token数*2次模型（如果定义一个模型跑一次只能一个batchsize）。
+Mistral Inference的加载方式
+官网：https://github.com/mistralai/mistral-inference
+首先需要在官网通过wget的方式再下载一遍模型，新的模型只有一个pth文件。
+wget  https://models.mistralcdn.com/mixtral-8x7b-v0-1/Mixtral-8x7B-v0.1-Instruct.tar
+一个比较快速的demo：
+torchrun --nproc-per-node 4 --no-python mistral-demo /home/notebook/data/group/huggingface/mixtrals/inference/7B_instruct
+我想知道它的源代码，首先where is mistral-demo，找到它的地址，然后在vscode如下配置：
+{
+    "name": "Debug mistral-demo",
+    "type": "python",
+    "request": "launch",
+    "program": "/home/er/.local/bin/torchrun",
+    "justMyCode": false,
+    "args": [
+        "--nproc-per-node=4",
+        // "--no-python",
+        "/home/er/.local/bin/mistral-demo",
+        "/home/notebook/data/group/huggingface/mixtrals/inference/7B_instruct"
+    ]
+},
+注意，这里需要把--no-python注释掉，才能在调试的时候确保断点会停，否则停不下来。
+这是对话demo，可以在命令行对话：
+torchrun --nproc-per-node 4 --no-python mistral-chat /home/notebook/data/group/huggingface/mixtrals/inference/7B_instruct --instruct
+加载好模型后，显存占用90880M，这一点符合直觉，因为模型磁盘占用大小是93405M.
+当我对话后，大概30个词，显存到了101G.
