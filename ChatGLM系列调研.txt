@@ -1,0 +1,137 @@
+智谱公司情况
+时间线
+2019年：智谱AI成立，源自清华技术成果
+2022年8月：发布GLM-130B
+2023年3月：发布ChatGLM以及开源版本ChatGLM-6B
+2023年6月：ChatGLM2
+2023年10月：ChatGLM3
+2024年1月：ChatGLM4
+官方网址
+官网：https://www.zhipuai.cn/
+huggingface：https://huggingface.co/THUDM
+github：https://github.com/THUDM
+技术报告：https://arxiv.org/pdf/2406.12793
+其他参考网址
+万字长文带你了解ChatGLM系列 - 暗影智芯的文章 - 知乎
+https://zhuanlan.zhihu.com/p/696394009
+私人测评：大模型横评系列 - ChatGLM-4 - toyama nao的文章 - 知乎
+https://zhuanlan.zhihu.com/p/678179798
+ChatGLM
+LLMs可分为三大架构类型：Encoder-only（如BERT）、Decoder-only（如GPT）及Encoder-Decoder（如T5）。三种预训练框架各有利弊，没有一种框架在以下三种领域的表现最佳。GLM的初衷是想要做一个各领域最佳的模型架构。
+亮点：
+（1）二维位置编码
+（2）输入x 被分成两部分：Part A 是损坏（挖走连续的token）的文本corrupt，Part B 是被挖走的片段。Part A 的词可以相互看到，但不能看到 Part B 中的任何词。Part B 的词可以看到 Part A 和 Part B 中的前置词，但不能看到 Part B 中的后续词
+但是在ChatGLM2中，二维位置编码被改成了RoPE，attention mask也不再分为两部分了，而是变成了decoder-only的架构。以上两个亮点被抛弃。
+ChatGLM4
+模型架构亮点
+（1）RoPE二维扩展：扩展了RoPE到二维形式，以适应GLM中的二维位置编码。这种技术有助于模型更有效地处理长上下文。
+（2）组查询注意力（GQA）：用组查询注意力替代了多头注意力（MHA），以减少推理时KV缓存的大小。由于GQA使用的参数比MHA少，因此增加了前馈网络（FFN）的参数数量，以保持模型尺寸不变，即将dffn设为隐藏层大小的10/3。
+模型细节——以glm-4-9b-chat为例
+glm-4-9b-chat模型的一些基本信息：
+ "hidden_size": 4096,
+ "num_attention_heads": 32,
+ "num_layers": 40,
+ "torch_dtype": "bfloat16",
+（一）数据流程
+1.格式化数据
+prompt是以[{"role": "user", "content": query}]的格式存在，其中query = "你好"。
+如果是多轮对话，则
+prompt = [{"role": "user", "content": "你好"},{"role": "assistant","content":"#上一轮模型的回复"},{"role": "user", "content": "我刚刚说的是什么话？"},]
+2.加入对话模板（apply_chat_template）
+经过tokenizer的apply_chat_template方法，prompt从列表格式变成一个字符串：
+'[gMASK] <sop> <|user|> \n你好 <|assistant|>'
+前缀可以根据任务的不同自由设置，单词是mask，句子是smask，文章是gmask。训练的时候大多是gmask
+3.分词（其实步骤2已经完成了）
+apply_chat_template中有一个参数是tokenize，如果这个参数设置为True，经过apply_chat_template方法后，会自动分词。
+得到input_ids：torch.Size([1, 6])
+（二）模型里的流程
+1.input_ids经过embedding层，得到hidden_states
+输入：1*6
+输出：1*6*4096
+2.生成旋转位置编码（RoPE）
+ChatGLM 首先生成一个适用于模型最大长度的位置信息张量，这样可以支持所有在该长度以内的输入。这也意味着输入的长度如果超过了模型的最大长度，模型将无法处理这些超出部分。
+模型最大长度是131072，因此得到的rotary_pos_emb的shape是：torch.Size([131072, 32, 2])。
+32指的是有每个注意力头的dim的一半。2指的是cos和sin。
+然后根据input_ids的长度截取对应的旋转位置编码张量，比如这里input_ids的长度是6，因此抽出来的结果是torch.Size([1, 6, 32, 2])
+3.hidden_states依次经过40个transformer层。在每个transformer层内部，首先经过LayerNorm层，得到layernorm_output
+输入：1*6*4096
+输出：1*6*4096
+然后经过自注意力层（下面会详细解释），和一些乱七八糟的Dropout层、MLP层。
+（三）自注意力层的细节
+(1)三分天下，得到qkv
+首先经过一个线性层：
+mixed_x_layer = self.query_key_value(hidden_states)
+输入：1*6*4096
+输出：1*6*4608
+注意，这里的输出的维度是4608，不是4096。
+直接将mixed_x_layer进行split，得到：
+query_layer：1*6*4096
+key_layer：1*6*256
+value_layer：1*6*256
+这里qkv的shape都不一样。q的元素的数量是k和v的16倍。
+回想llama的自注意力机制，是输入分别经过三个线性层，得到了q/k/v三个矩阵，然后各自reshape成1*32*6*128。这里是直接只经过一个线性层，然后通过split的方式得到qkv。
+（2）reshape+transpose
+query_layer：1*32*6*128
+key_layer：1*2*6*128
+value_layer：1*2*6*128
+（3）旋转位置编码
+首先回想起llama中的旋转位置编码的细节。q/k/v的shape都是torch.Size([bs, 头数, length, 每个头的dim])
+第一步，生成theta
+比如说dim=128（每个注意力头的dim），那么 theta就是一个64维的向量，即10000**(-2i/d)，其中d=128，i的取值是从0到63。
+第二步，生成length*dim的大矩阵
+length是6，theta的维度是64，那么生成一个6*64的大矩阵。然后复制扩展一倍，变成6*128的矩阵
+为什么要复制扩展，因为RoPE的公式就是这样的，如下图所示。
+
+添加图片注释，不超过 140 字（可选）
+第三步，生成cos和sin
+对大矩阵施加cos，就变成了cos矩阵。施加sin，就变成了sin矩阵。
+然后cos和sin矩阵的shape都是torch.Size([bs,  length, 每个头的dim])
+注意，不同的头之间，是共享位置编码矩阵的。在这个例子中，cos和sin矩阵的shape是1*6*128，后面两个维度和qkv的shape是对应的。
+第四步：点积相乘后得到嵌入了位置向量后的q和k
+只对q和k两个需要计算内积的矩阵赋予旋转位置编码。经过对应的点积相乘，形成了新的query_states, key_states，shape没有变化
+ChatGLM的RoPE是怎么做的？
+第一步，生成theta
+和llama不同的是，这里的dim本来是128，但是（不知道为什么）还要再除以2，变成了64。
+生成了theta，是5000000**(-2i/d)，d=64，，i的取值是从0到31。theta向量是32维的。
+#对比llama中，theta向量是64维的。
+第二步，生成length*32的大矩阵
+和llama不同的是，这里的length是最长的上下文长度131072（后面的步骤中，再根据输入的长度，来取出前几个值）
+得到一个131072*32的大矩阵
+#对比llama中，生成的大矩阵是6*128维度的
+第三步，生成cos和sin矩阵
+cos和sin矩阵就是分别对第二步的大矩阵施加cos和sin的结果，shape都是131072*32
+第四步：取出前6（当前prompt长度）个值
+得到cos：6*32，sin：6*32
+第四步：点积相乘后得到嵌入了位置向量后的q和k
+如下图所示，里面的逻辑比较复杂。
+
+添加图片注释，不超过 140 字（可选）
+q和k经过旋转位置编码之后，shape不变。
+（4）更新kvcache
+（5）点积缩放自注意力
+截止到目前位置，qkv的shape是：
+query_layer：1*32*6*128
+key_layer：1*2*6*128
+value_layer：1*2*6*128
+这样可以做自注意力吗？是可以的。但是需要经过一定的操作。这里使用的是Grouped-query。将查询头划分为G组，每个组共享一个键和值。这样可以减少k和v的数量，加速基于kvcache的推理。在ChatGLM-9b中，原本有32个注意力头，但是分成了2组。每个组都共享相同的k和v。
+
+添加图片注释，不超过 140 字（可选）
+具体而言，首先将k和v经过expand操作。
+原本的key_layer：1*2*6*128
+首先expand成1*2*16*6*128
+然后reshape成1*32*6*128
+value_layer也是一样的操作。
+这样q/k/v的shape就变成一样的了：1*32*6*128，可以直接调用torch.nn.functional.scaled_dot_product_attention
+得到的结果是1*32*6*128.
+举一个具体的例子方便理解：第一个头的q，去查询第一个头的k，然后和第一个头的v做点积。第二个头的q，按照传统的注意力，应该去查询第二个头的k，但是在这里，仍然去查询第一个头的k（k的头一共只有2个）。
+（6）transpose+reshape
+然后经过transpose：1*6*32*128
+然后经过reshape：1*6*4096
+（7）投影
+经过一个线性层后，结果是1*6*4096
+除了hidden_state，这里还会输出kvcache，shape是：
+[#2][#layer_nums](#bs*头数*length*每个头的dim)
+这里的头数是多少？以q的32为准，还是k/v的2为准？肯定是以2为准，因为是"KV"cache。
+综合下来，其实本质上和普通的自注意力的流程没有区别。两个主要区别是：
+（1）三分天下的时候，采用split操作，q分到了4096维度，k和v各自分到了256个维度，相差16倍。
+（2）在计算点积缩放注意力之前，通过expand的方式，对k和v扩充至原来的16倍，达到和q一样的shape。
